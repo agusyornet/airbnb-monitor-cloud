@@ -1,0 +1,58 @@
+name: Airbnb Monitor
+
+on:
+  schedule:
+    # Run every 30 minutes
+    - cron: '*/30 * * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install selenium
+        pip install webdriver-manager
+        pip install python-dotenv
+        pip install requests
+    
+    - name: Install Chrome
+      run: |
+        wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+        sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
+        sudo apt-get update
+        sudo apt-get install -y google-chrome-stable
+    
+    - name: Create config file
+      run: |
+        echo "SENDER_EMAIL=${{ secrets.SENDER_EMAIL }}" > .env
+        echo "SENDER_PASSWORD=${{ secrets.SENDER_PASSWORD }}" >> .env
+        echo "RECIPIENT_EMAIL=${{ secrets.RECIPIENT_EMAIL }}" >> .env
+        echo "AIRBNB_SEARCH_URL=${{ secrets.AIRBNB_SEARCH_URL }}" >> .env
+    
+    - name: Run Airbnb Monitor
+      run: python airbnb_monitor_github.py
+    
+    - name: Upload seen listings (persist data)
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: seen-listings
+        path: seen_listings.json
+        retention-days: 30
+    
+    - name: Download previous seen listings
+      uses: actions/download-artifact@v3
+      continue-on-error: true
+      with:
+        name: seen-listings
