@@ -34,7 +34,8 @@ class AirbnbMonitorGitHub:
         self.data_file = 'seen_listings.json'
         
         # Your Airbnb search URL
-        self.search_url = os.getenv('AIRBNB_SEARCH_URL')
+        self.search_urls = [os.getenv(f"AIRBNB_SEARCH_URL_{i}") for i in range(1,10)]
+        self.search_urls = [s for s in self.search_urls if s is not None]
         
         # Load previously seen listings
         self.seen_listings = self.load_seen_listings()
@@ -91,16 +92,16 @@ class AirbnbMonitorGitHub:
                 json.dump(list(self.seen_listings), f)
         except Exception as e:
             logger.error(f"Error saving seen listings: {e}")
-    
-    def get_listings(self):
-        """Fetch current listings using Selenium"""
+
+    def get_listing_for_url(self, search_url):
+                """Fetch current listings using Selenium"""
         if not self.driver:
             if not self.setup_driver():
                 return []
         
         try:
             logger.info("Loading Airbnb search page...")
-            self.driver.get(self.search_url)
+            self.driver.get(search_url)
             
             # Wait a bit for the page to load
             time.sleep(8)
@@ -225,6 +226,15 @@ class AirbnbMonitorGitHub:
         except Exception as e:
             logger.error(f"Error fetching listings with Selenium: {e}")
             return []
+
+    
+    def get_listings(self):
+        result = []
+        for search_url in self.search_urls:
+            result.extend(get_listing_for_url(search_url))
+
+        return result
+
     
     def send_notification(self, new_listings):
         """Send email notification for new listings"""
@@ -341,7 +351,7 @@ class AirbnbMonitorGitHub:
 
 def main():
     # Verify required environment variables
-    required_vars = ['SENDER_EMAIL', 'SENDER_PASSWORD', 'RECIPIENT_EMAIL', 'AIRBNB_SEARCH_URL']
+    required_vars = ['SENDER_EMAIL', 'SENDER_PASSWORD', 'RECIPIENT_EMAIL']
     missing_vars = [var for var in required_vars if not os.getenv(var)]
     
     if missing_vars:
