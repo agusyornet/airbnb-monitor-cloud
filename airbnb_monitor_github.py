@@ -94,7 +94,7 @@ class AirbnbMonitorGitHub:
             logger.error(f"Error saving seen listings: {e}")
 
     def get_listing_for_url(self, search_url):
-                """Fetch current listings using Selenium"""
+        """Fetch current listings using Selenium"""
         if not self.driver:
             if not self.setup_driver():
                 return []
@@ -231,7 +231,8 @@ class AirbnbMonitorGitHub:
     def get_listings(self):
         result = []
         for search_url in self.search_urls:
-            result.extend(get_listing_for_url(search_url))
+            logger.info(f"Getting listings for {search_url}")
+            result.extend(self.get_listing_for_url(search_url))
 
         return result
 
