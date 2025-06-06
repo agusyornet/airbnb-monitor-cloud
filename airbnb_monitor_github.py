@@ -117,6 +117,7 @@ class AirbnbMonitorGitHub:
             chrome_options.add_argument("--ignore-ssl-errors")
             chrome_options.add_argument("--ignore-certificate-errors-spki-list")
             chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+            chrome_options.add_argument("--incognito")
             
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
             chrome_options.add_experimental_option('useAutomationExtension', False)
