@@ -437,7 +437,7 @@ class AirbnbMonitorGitHub:
         
         for i, search_url in enumerate(self.search_urls, 1):
             search_name = f"Search {i}"
-            logger.info(f"=== Processing {search_name} ===")
+            logger.info(f"=== Processing {search_name} for URL {search_url} ===")
             
             listings = self.get_listing_for_url(search_url, search_name)
             all_listings.extend(listings)
