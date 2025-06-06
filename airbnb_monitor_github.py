@@ -1,3 +1,4 @@
+
 import json
 import smtplib
 import os
@@ -46,30 +47,19 @@ class AirbnbMonitorGitHub:
         """Load search URLs from environment variables"""
         urls = []
         
-        logger.info("=== DEBUG: Checking environment variables ===")
-        
-        # Check all environment variables that might be URLs
-        for key, value in os.environ.items():
-            if 'AIRBNB' in key:
-                logger.info(f"Found env var: {key} = {value[:100] if value else 'None'}...")
-        
         # Add base URL first
         base_url = os.getenv('AIRBNB_SEARCH_URL')
         if base_url:
             urls.append(base_url)
-            logger.info(f"✅ Added base URL (AIRBNB_SEARCH_URL): {base_url[:100]}...")
-        else:
-            logger.warning("❌ No AIRBNB_SEARCH_URL found")
+            logger.info(f"✅ Added base URL: {base_url[:100]}...")
         
-        # Add numbered URLs - check 1 through 10
+        # Add numbered URLs
         for i in range(1, 11):
             url_key = f"AIRBNB_SEARCH_URL_{i}"
             url = os.getenv(url_key)
             if url:
                 urls.append(url)
                 logger.info(f"✅ Added {url_key}: {url[:100]}...")
-            else:
-                logger.debug(f"❌ No {url_key} found")
         
         # Remove duplicates while preserving order
         unique_urls = []
@@ -79,10 +69,7 @@ class AirbnbMonitorGitHub:
                 unique_urls.append(url)
                 seen.add(url)
         
-        logger.info(f"=== TOTAL UNIQUE URLs LOADED: {len(unique_urls)} ===")
-        for i, url in enumerate(unique_urls, 1):
-            logger.info(f"URL {i}: {url}")
-        
+        logger.info(f"Total unique URLs loaded: {len(unique_urls)}")
         return unique_urls
     
     def setup_driver(self):
@@ -95,21 +82,76 @@ class AirbnbMonitorGitHub:
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--disable-extensions")
+            chrome_options.add_argument("--disable-plugins")
+            chrome_options.add_argument("--disable-images")
+            chrome_options.add_argument("--disable-javascript")
             chrome_options.add_argument("--window-size=1920,1080")
             chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
+            chrome_options.add_argument("--disable-web-security")
+            chrome_options.add_argument("--allow-running-insecure-content")
+            chrome_options.add_argument("--ignore-certificate-errors")
+            chrome_options.add_argument("--ignore-ssl-errors")
+            chrome_options.add_argument("--ignore-certificate-errors-spki-list")
             chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
             
-            # Use the system Chrome
-            service = Service('/usr/bin/google-chrome')
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            chrome_options.add_experimental_option('useAutomationExtension', False)
             
-            # Execute script to remove automation indicators
-            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            # Try multiple Chrome paths
+            chrome_paths = [
+                '/usr/bin/google-chrome',
+                '/usr/bin/google-chrome-stable',
+                '/usr/bin/chromium-browser',
+                '/usr/bin/chromium'
+            ]
             
-            logger.info("✅ WebDriver setup successful")
-            return True
+            driver_created = False
+            
+            # Method 1: Try using system Chrome
+            for chrome_path in chrome_paths:
+                if os.path.exists(chrome_path):
+                    try:
+                        logger.info(f"Trying Chrome at: {chrome_path}")
+                        chrome_options.binary_location = chrome_path
+                        service = Service(chrome_path)
+                        self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                        driver_created = True
+                        logger.info(f"✅ WebDriver created successfully using {chrome_path}")
+                        break
+                    except Exception as e:
+                        logger.warning(f"Failed with {chrome_path}: {e}")
+                        continue
+            
+            # Method 2: Use ChromeDriverManager as fallback
+            if not driver_created:
+                try:
+                    logger.info("Trying ChromeDriverManager...")
+                    # Remove binary location for ChromeDriverManager
+                    if hasattr(chrome_options, 'binary_location'):
+                        delattr(chrome_options, 'binary_location')
+                    
+                    service = Service(ChromeDriverManager().install())
+                    self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                    driver_created = True
+                    logger.info("✅ WebDriver created successfully using ChromeDriverManager")
+                except Exception as e:
+                    logger.error(f"ChromeDriverManager also failed: {e}")
+            
+            if driver_created:
+                # Execute script to remove automation indicators
+                try:
+                    self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                    self.driver.execute_script("Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]})")
+                    self.driver.execute_script("Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']})")
+                except:
+                    pass  # These are optional
+                
+                logger.info("✅ WebDriver setup successful")
+                return True
+            else:
+                logger.error("❌ All WebDriver methods failed")
+                return False
             
         except Exception as e:
             logger.error(f"❌ Error setting up WebDriver: {e}")
@@ -146,120 +188,340 @@ class AirbnbMonitorGitHub:
         except Exception as e:
             logger.error(f"Error saving seen listings: {e}")
 
-    def test_page_load(self, search_url, search_name="Test"):
-        """Simple test to see if we can load the page and find basic elements"""
+    def get_listing_for_url(self, search_url, search_name="Unknown"):
+        """Fetch current listings for a specific URL using Selenium"""
         if not self.driver:
             if not self.setup_driver():
-                return False
+                return []
         
         try:
-            logger.info(f"=== TESTING PAGE LOAD FOR {search_name} ===")
-            logger.info(f"URL: {search_url}")
+            logger.info(f"=== Loading {search_name} ===")
+            logger.info(f"URL: {search_url[:100]}...")
             
-            # Load the page
-            logger.info("Loading page...")
             self.driver.get(search_url)
             
             # Wait for page to load
+            logger.info("Waiting for page to load...")
             time.sleep(15)
             
-            # Get basic page info
+            # Get page info
             title = self.driver.title
             current_url = self.driver.current_url
             logger.info(f"Page title: '{title}'")
-            logger.info(f"Current URL: {current_url}")
+            logger.info(f"Current URL: {current_url[:100]}...")
             
-            # Check for basic elements
-            selectors_to_test = [
+            # Wait for listings to load with multiple attempts
+            listing_found = False
+            wait_selectors = [
                 "[data-testid='card-container']",
-                "a[href*='/rooms/']", 
+                "a[href*='/rooms/']",
                 "[data-testid='listing-card-title']",
-                "div[itemProp='itemListElement']",
-                ".no-results",
-                "[data-testid='stays-search-results-section']"
+                "div[itemProp='itemListElement']"
             ]
             
-            found_elements = {}
-            for selector in selectors_to_test:
+            for selector in wait_selectors:
+                try:
+                    logger.info(f"Waiting for selector: {selector}")
+                    WebDriverWait(self.driver, 20).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                    )
+                    logger.info(f"✅ Found elements with selector: {selector}")
+                    listing_found = True
+                    break
+                except:
+                    logger.warning(f"❌ Timeout waiting for selector: {selector}")
+                    continue
+            
+            if not listing_found:
+                logger.warning("No listing elements found with any selector")
+                
+                # Debug what's actually on the page
+                page_source = self.driver.page_source
+                logger.info(f"Page source length: {len(page_source)} characters")
+                
+                # Check for specific indicators
+                indicators = [
+                    ('data-testid="card-container"', 'card containers'),
+                    ('/rooms/', 'room links'),
+                    ('no results', 'no results message'),
+                    ('search-results', 'search results'),
+                    ('Just a moment', 'Cloudflare blocking')
+                ]
+                
+                for indicator, description in indicators:
+                    count = page_source.lower().count(indicator.lower())
+                    logger.info(f"Page contains '{description}': {count} times")
+                
+                return []
+            
+            # Try multiple selectors to find listing cards
+            listing_selectors = [
+                "[data-testid='card-container']",
+                "div[data-testid='card-container']",
+                "a[href*='/rooms/']",
+                "div[itemProp='itemListElement']"
+            ]
+            
+            current_listings = []
+            
+            for selector in listing_selectors:
                 try:
                     elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    found_elements[selector] = len(elements)
-                    logger.info(f"Selector '{selector}': {len(elements)} elements")
+                    logger.info(f"Found {len(elements)} elements with selector: {selector}")
+                    
+                    if not elements:
+                        continue
+                    
+                    for i, element in enumerate(elements[:20]):  # Limit to first 20
+                        try:
+                            # Try to extract listing URL and ID
+                            if element.tag_name == 'a' and '/rooms/' in element.get_attribute('href'):
+                                link_element = element
+                                listing_url = element.get_attribute('href')
+                            else:
+                                link_element = element.find_element(By.CSS_SELECTOR, "a[href*='/rooms/']")
+                                listing_url = link_element.get_attribute('href')
+                            
+                            if listing_url and '/rooms/' in listing_url:
+                                # Extract listing ID from URL
+                                listing_id = listing_url.split('/rooms/')[-1].split('?')[0].split('/')[0]
+                                
+                                # Try to get listing title
+                                title = None
+                                title_selectors = [
+                                    "[data-testid='listing-card-title']",
+                                    "div[data-testid='listing-card-title']",
+                                    ".t1jojoys",
+                                    "h3",
+                                    ".fb4nyux"
+                                ]
+                                
+                                for title_selector in title_selectors:
+                                    try:
+                                        title_element = element.find_element(By.CSS_SELECTOR, title_selector)
+                                        title = title_element.text.strip()
+                                        if title:
+                                            break
+                                    except:
+                                        continue
+                                
+                                if not title:
+                                    title = f"Airbnb Listing {listing_id}"
+                                
+                                # Try to get price
+                                price = "Price not available"
+                                price_selectors = [
+                                    "[data-testid='price-availability'] span",
+                                    "span._1y74zjx",
+                                    "span[data-testid='price']",
+                                    "div._1jo4hgw span",
+                                    "span"
+                                ]
+                                
+                                for price_selector in price_selectors:
+                                    try:
+                                        price_elements = element.find_elements(By.CSS_SELECTOR, price_selector)
+                                        for price_element in price_elements:
+                                            price_text = price_element.text.strip()
+                                            if price_text and any(currency in price_text for currency in ['kr', '$', '€', '£', 'DKK', 'SEK', 'EUR', '₹', '¥']):
+                                                price = price_text
+                                                break
+                                        if price != "Price not available":
+                                            break
+                                    except:
+                                        continue
+                                
+                                # Try to get image
+                                image_url = None
+                                image_selectors = [
+                                    "img[data-testid='listing-card-image']",
+                                    "img[data-original]",
+                                    "img[src*='airbnb']",
+                                    "picture img",
+                                    "img"
+                                ]
+                                
+                                for img_selector in image_selectors:
+                                    try:
+                                        img_element = element.find_element(By.CSS_SELECTOR, img_selector)
+                                        src = img_element.get_attribute('src') or img_element.get_attribute('data-original')
+                                        if src and ('airbnb' in src or 'https://' in src):
+                                            image_url = src
+                                            break
+                                    except:
+                                        continue
+                                
+                                if listing_id and len(listing_id) > 3:  # Valid listing ID
+                                    current_listings.append({
+                                        'id': listing_id,
+                                        'name': title,
+                                        'url': listing_url,
+                                        'price': price,
+                                        'image_url': image_url,
+                                        'search_name': search_name
+                                    })
+                                    logger.info(f"✅ Extracted listing: {listing_id} - {title}")
+                        
+                        except Exception as e:
+                            continue  # Skip this element if we can't extract data
+                    
+                    if current_listings:
+                        logger.info(f"Successfully extracted {len(current_listings)} listings using selector: {selector}")
+                        break  # If we found listings with this selector, stop trying others
+                        
                 except Exception as e:
-                    found_elements[selector] = f"Error: {e}"
-                    logger.error(f"Selector '{selector}': Error - {e}")
+                    logger.debug(f"Selector {selector} failed: {e}")
+                    continue
             
-            # Check page source for clues
-            page_source = self.driver.page_source
-            logger.info(f"Page source length: {len(page_source)} characters")
+            # Remove duplicates based on ID
+            seen_ids = set()
+            unique_listings = []
+            for listing in current_listings:
+                if listing['id'] not in seen_ids:
+                    seen_ids.add(listing['id'])
+                    unique_listings.append(listing)
             
-            # Look for specific Airbnb indicators
-            airbnb_indicators = [
-                'data-testid="card-container"',
-                '/rooms/',
-                'listing-card',
-                'no results',
-                'search-results',
-                'stays-search'
-            ]
+            logger.info(f"Final result: {len(unique_listings)} unique listings for {search_name}")
+            return unique_listings
             
-            for indicator in airbnb_indicators:
-                count = page_source.lower().count(indicator.lower())
-                logger.info(f"Page contains '{indicator}': {count} times")
-            
-            # Return True if we found any room links
-            room_links = found_elements.get("a[href*='/rooms/']", 0)
-            if isinstance(room_links, int) and room_links > 0:
-                logger.info(f"✅ SUCCESS: Found {room_links} room links on page")
-                return True
-            else:
-                logger.warning(f"❌ ISSUE: No room links found on page")
-                return False
-                
         except Exception as e:
-            logger.error(f"❌ Error testing page load: {e}")
-            return False
+            logger.error(f"Error fetching listings for {search_name}: {e}")
+            return []
 
-    def check_for_new_listings(self):
-        """Main function to check for new listings"""
-        logger.info(f"🤖 GitHub Actions: Starting URL validation for {len(self.search_urls)} search URL(s)...")
+    def get_listings(self):
+        """Get listings from all search URLs"""
+        all_listings = []
         
-        if not self.search_urls:
-            logger.error("❌ CRITICAL: No search URLs configured!")
-            logger.error("Please check your GitHub secrets:")
-            logger.error("- AIRBNB_SEARCH_URL (base URL)")
-            logger.error("- AIRBNB_SEARCH_URL_2, AIRBNB_SEARCH_URL_3, etc. (additional URLs)")
-            return
-        
-        # Test each URL
-        working_urls = 0
         for i, search_url in enumerate(self.search_urls, 1):
             search_name = f"Search {i}"
-            logger.info(f"\n=== TESTING {search_name} ===")
+            logger.info(f"=== Processing {search_name} ===")
             
-            if self.test_page_load(search_url, search_name):
-                working_urls += 1
-                logger.info(f"✅ {search_name}: SUCCESS")
-            else:
-                logger.warning(f"❌ {search_name}: FAILED")
+            listings = self.get_listing_for_url(search_url, search_name)
+            all_listings.extend(listings)
             
-            # Small delay between tests
-            time.sleep(5)
+            # Add delay between requests
+            if i < len(self.search_urls):
+                logger.info("Waiting 10 seconds before next search...")
+                time.sleep(10)
+
+        logger.info(f"Total listings found across all searches: {len(all_listings)}")
+        return all_listings
+    
+    def send_notification(self, new_listings):
+        """Send email notification for new listings"""
+        if not new_listings:
+            return
         
-        logger.info(f"\n=== FINAL RESULTS ===")
-        logger.info(f"Total URLs tested: {len(self.search_urls)}")
-        logger.info(f"Working URLs: {working_urls}")
-        logger.info(f"Failed URLs: {len(self.search_urls) - working_urls}")
+        try:
+            # Create message
+            msg = MIMEMultipart('alternative')
+            msg['From'] = self.sender_email
+            msg['To'] = self.recipient_email
+            msg['Subject'] = f"🏠 {len(new_listings)} New Airbnb Listing(s) Found!"
+            
+            # Group listings by search
+            listings_by_search = {}
+            for listing in new_listings:
+                search_name = listing.get('search_name', 'Unknown Search')
+                if search_name not in listings_by_search:
+                    listings_by_search[search_name] = []
+                listings_by_search[search_name].append(listing)
+            
+            # Create email body
+            body = f"""
+            <h2>🤖 New Airbnb Listings Found by GitHub Actions!</h2>
+            <p>Found {len(new_listings)} new listing(s) across {len(listings_by_search)} search(es):</p>
+            <br>
+            """
+            
+            for search_name, search_listings in listings_by_search.items():
+                body += f"""<h3 style="color: #ff5a5f; margin: 25px 0 15px 0;">📍 {search_name} ({len(search_listings)} new)</h3>"""
+                
+                for listing in search_listings:
+                    clean_name = listing['name'].encode('ascii', 'ignore').decode('ascii') if listing['name'] else f"Listing {listing['id']}"
+                    price_display = listing.get('price', 'Price not available')
+                    image_url = listing.get('image_url', '')
+                    
+                    listing_html = f"""
+                    <div style="border: 1px solid #ddd; padding: 20px; margin: 15px 0; border-radius: 8px; background-color: #fafafa;">
+                        <div style="display: flex; align-items: flex-start; gap: 15px;">
+                    """
+                    
+                    if image_url:
+                        listing_html += f"""
+                            <div style="flex-shrink: 0;">
+                                <img src="{image_url}" alt="Property image" style="width: 120px; height: 90px; object-fit: cover; border-radius: 6px; border: 1px solid #ddd;">
+                            </div>
+                        """
+                    
+                    listing_html += f"""
+                            <div style="flex-grow: 1;">
+                                <h3 style="margin: 0 0 8px 0; color: #222; font-size: 16px;">{clean_name}</h3>
+                                <p style="margin: 5px 0; color: #666; font-size: 14px;"><strong>Price:</strong> <span style="color: #ff5a5f; font-weight: bold;">{price_display}</span></p>
+                                <p style="margin: 5px 0; color: #666; font-size: 14px;"><strong>ID:</strong> {listing['id']}</p>
+                                <p style="margin: 10px 0 0 0;"><a href="{listing['url']}" style="color: #ff5a5f; text-decoration: none; font-weight: bold; background-color: #fff; padding: 8px 16px; border: 2px solid #ff5a5f; border-radius: 4px; display: inline-block;">📍 View Listing</a></p>
+                            </div>
+                        </div>
+                    </div>
+                    """
+                    
+                    body += listing_html
+            
+            body += f"""
+            <br>
+            <p style="color: #666; font-size: 12px; margin-top: 30px;">
+                This email was generated by your Airbnb Monitor running on GitHub Actions.<br>
+                Monitoring timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}
+            </p>
+            """
+            
+            msg.attach(MIMEText(body, 'html'))
+            
+            # Send email
+            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                server.starttls()
+                server.login(self.sender_email, self.sender_password)
+                server.send_message(msg)
+            
+            logger.info(f"Email notification sent for {len(new_listings)} new listings")
+            
+        except Exception as e:
+            logger.error(f"Error sending email: {e}")
+    
+    def check_for_new_listings(self):
+        """Main function to check for new listings"""
+        logger.info(f"🤖 GitHub Actions: Checking for new listings across {len(self.search_urls)} search URL(s)...")
         
-        if working_urls == 0:
-            logger.error("❌ CRITICAL: No URLs are working!")
-            logger.error("This could be due to:")
-            logger.error("1. Airbnb blocking automated access")
-            logger.error("2. Invalid/expired URLs")
-            logger.error("3. Network issues")
-            logger.error("4. URL returning 'no results'")
+        if not self.search_urls:
+            logger.error("No search URLs configured!")
+            return
+        
+        current_listings = self.get_listings()
+        if not current_listings:
+            logger.warning("No listings found across all searches")
+            return
+        
+        new_listings = []
+        current_ids = set()
+        
+        for listing in current_listings:
+            listing_id = listing['id']
+            current_ids.add(listing_id)
+            
+            if listing_id not in self.seen_listings:
+                new_listings.append(listing)
+                logger.info(f"New listing found: {listing['name']} (ID: {listing_id})")
+        
+        # Update seen listings
+        self.seen_listings.update(current_ids)
+        self.save_seen_listings()
+        
+        # Send notification if new listings found
+        if new_listings:
+            self.send_notification(new_listings)
+            logger.info(f"Found {len(new_listings)} new listings across all searches")
         else:
-            logger.info(f"✅ SUCCESS: {working_urls} URL(s) are working")
+            logger.info("No new listings found across any searches")
     
     def run_once(self):
         """Run the monitor once (for GitHub Actions)"""
@@ -279,8 +541,6 @@ def main():
     if missing_vars:
         logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
         return
-    
-    logger.info("=== STARTING AIRBNB MONITOR DEBUG TEST ===")
     
     monitor = AirbnbMonitorGitHub()
     
