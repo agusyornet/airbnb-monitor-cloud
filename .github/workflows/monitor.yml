@@ -2,7 +2,7 @@ name: Airbnb Monitor
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '*/120 * * * *'
   workflow_dispatch:
 
 jobs:
