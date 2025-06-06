@@ -245,7 +245,7 @@ class AirbnbMonitorGitHub:
             
             # Wait for page to load
             logger.info("Waiting for page to load...")
-            time.sleep(15)
+            time.sleep(30)
             
             # Get page info
             title = self.driver.title
