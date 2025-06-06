@@ -1,4 +1,3 @@
-
 import json
 import smtplib
 import os
@@ -47,19 +46,30 @@ class AirbnbMonitorGitHub:
         """Load search URLs from environment variables"""
         urls = []
         
+        logger.info("=== DEBUG: Checking environment variables ===")
+        
+        # Check all environment variables for debugging
+        airbnb_vars = {k: v for k, v in os.environ.items() if 'AIRBNB' in k}
+        for key, value in airbnb_vars.items():
+            logger.info(f"Found env var: {key} = {value[:100] if value else 'None'}...")
+        
         # Add base URL first
         base_url = os.getenv('AIRBNB_SEARCH_URL')
         if base_url:
             urls.append(base_url)
             logger.info(f"✅ Added base URL: {base_url[:100]}...")
+        else:
+            logger.warning("❌ No AIRBNB_SEARCH_URL found")
         
-        # Add numbered URLs
+        # Add numbered URLs - check 1 through 10
         for i in range(1, 11):
             url_key = f"AIRBNB_SEARCH_URL_{i}"
             url = os.getenv(url_key)
             if url:
                 urls.append(url)
                 logger.info(f"✅ Added {url_key}: {url[:100]}...")
+            else:
+                logger.debug(f"❌ No {url_key} found")
         
         # Remove duplicates while preserving order
         unique_urls = []
@@ -70,6 +80,9 @@ class AirbnbMonitorGitHub:
                 seen.add(url)
         
         logger.info(f"Total unique URLs loaded: {len(unique_urls)}")
+        for i, url in enumerate(unique_urls, 1):
+            logger.info(f"URL {i}: {url}")
+        
         return unique_urls
     
     def setup_driver(self):
@@ -127,16 +140,37 @@ class AirbnbMonitorGitHub:
             if not driver_created:
                 try:
                     logger.info("Trying ChromeDriverManager...")
-                    # Remove binary location for ChromeDriverManager
-                    if hasattr(chrome_options, 'binary_location'):
-                        delattr(chrome_options, 'binary_location')
+                    # Create fresh options for ChromeDriverManager
+                    fallback_options = Options()
+                    fallback_options.add_argument("--headless")
+                    fallback_options.add_argument("--no-sandbox")
+                    fallback_options.add_argument("--disable-dev-shm-usage")
+                    fallback_options.add_argument("--disable-gpu")
+                    fallback_options.add_argument("--window-size=1920,1080")
+                    fallback_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                     
                     service = Service(ChromeDriverManager().install())
-                    self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                    self.driver = webdriver.Chrome(service=service, options=fallback_options)
                     driver_created = True
                     logger.info("✅ WebDriver created successfully using ChromeDriverManager")
                 except Exception as e:
                     logger.error(f"ChromeDriverManager also failed: {e}")
+            
+            # Method 3: Try with system-installed chromedriver
+            if not driver_created:
+                try:
+                    logger.info("Trying system chromedriver...")
+                    system_options = Options()
+                    system_options.add_argument("--headless")
+                    system_options.add_argument("--no-sandbox")
+                    system_options.add_argument("--disable-dev-shm-usage")
+                    
+                    # Try to use system chromedriver
+                    self.driver = webdriver.Chrome(options=system_options)
+                    driver_created = True
+                    logger.info("✅ WebDriver created successfully using system chromedriver")
+                except Exception as e:
+                    logger.error(f"System chromedriver failed: {e}")
             
             if driver_created:
                 # Execute script to remove automation indicators
