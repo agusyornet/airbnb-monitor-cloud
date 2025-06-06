@@ -2,9 +2,8 @@ name: Airbnb Monitor
 
 on:
   schedule:
-    # Run every 30 minutes
     - cron: '*/30 * * * *'
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch:
 
 jobs:
   monitor:
@@ -18,6 +17,13 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
+    
+    - name: Download previous seen listings
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: seen-listings
+        path: .
     
     - name: Install dependencies
       run: |
@@ -43,16 +49,10 @@ jobs:
     - name: Run Airbnb Monitor
       run: python airbnb_monitor_github.py
     
-    - name: Upload seen listings (persist data)
-      uses: actions/upload-artifact@v3
+    - name: Upload seen listings
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: seen-listings
         path: seen_listings.json
         retention-days: 30
-    
-    - name: Download previous seen listings
-      uses: actions/download-artifact@v3
-      continue-on-error: true
-      with:
-        name: seen-listings
