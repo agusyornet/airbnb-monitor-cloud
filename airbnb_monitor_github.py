@@ -242,7 +242,7 @@ class AirbnbMonitorGitHub:
             title = self.driver.title
             current_url = self.driver.current_url
             logger.info(f"Page title: '{title}'")
-            logger.info(f"Current URL: {current_url[:100]}...")
+            logger.info(f"Current URL: {current_url}")
             
             # Wait for listings to load with multiple attempts
             listing_found = False
