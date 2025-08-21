@@ -1,9 +1,10 @@
-name: Airbnb Monitor
+name: Airbnb Monitor Clean
 
 on:
   schedule:
-    - cron: '*/120 * * * *'
-  workflow_dispatch:
+    # Run every 12 hours (at 6 AM and 6 PM UTC)
+    - cron: '0 6,18 * * *'
+  workflow_dispatch: # Allow manual triggering
 
 jobs:
   monitor:
@@ -12,25 +13,17 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
     
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
     
-    - name: Download previous seen listings
-      uses: actions/download-artifact@v4
-      continue-on-error: true
-      with:
-        name: seen-listings
-        path: .
-    
     - name: Install dependencies
       run: |
-        pip install selenium
-        pip install webdriver-manager
-        pip install python-dotenv
-        pip install requests
+        pip install selenium webdriver-manager python-dotenv requests
     
     - name: Install Chrome
       run: |
@@ -39,20 +32,51 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y google-chrome-stable
     
-    - name: Create config file
+    - name: Debug - Check files before
       run: |
-        echo "SENDER_EMAIL=${{ secrets.SENDER_EMAIL }}" > .env
-        echo "SENDER_PASSWORD=${{ secrets.SENDER_PASSWORD }}" >> .env
-        echo "RECIPIENT_EMAIL=${{ secrets.RECIPIENT_EMAIL }}" >> .env
-        echo "AIRBNB_SEARCH_URL=${{ secrets.AIRBNB_SEARCH_URL }}" >> .env
+        echo "=== FILES BEFORE ==="
+        ls -la
+        if [ -f "seen_listings.json" ]; then
+          echo "seen_listings.json exists:"
+          cat seen_listings.json | head -c 500
+        else
+          echo "seen_listings.json does not exist"
+        fi
     
     - name: Run Airbnb Monitor
-      run: python airbnb_monitor_github.py
+      env:
+        SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+        SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+        RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+        AIRBNB_SEARCH_URL: ${{ secrets.AIRBNB_SEARCH_URL }}
+        AIRBNB_SEARCH_URL_1: ${{ secrets.AIRBNB_SEARCH_URL_1 }}
+        AIRBNB_SEARCH_URL_2: ${{ secrets.AIRBNB_SEARCH_URL_2 }}
+        AIRBNB_SEARCH_URL_3: ${{ secrets.AIRBNB_SEARCH_URL_3 }}
+      run: |
+        python airbnb_monitor_github.py
     
-    - name: Upload seen listings
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: seen-listings
-        path: seen_listings.json
-        retention-days: 30
+    - name: Debug - Check files after
+      run: |
+        echo "=== FILES AFTER ==="
+        ls -la
+        if [ -f "seen_listings.json" ]; then
+          echo "seen_listings.json after run:"
+          cat seen_listings.json | head -c 500
+        fi
+        echo "Git status:"
+        git status
+    
+    - name: Commit and push seen listings
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add seen_listings.json
+        if git diff --staged --quiet; then
+          echo "No changes to commit - seen_listings.json unchanged"
+        else
+          git commit -m "Update seen listings - $(date)"
+          git push
+          echo "✅ Pushed changes to repository"
+        fi
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
