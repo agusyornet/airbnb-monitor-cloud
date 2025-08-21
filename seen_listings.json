@@ -1,5 +1,9 @@
 {
-  "seen_listings": [],
-  "last_updated": "",
-  "total_urls": 0
+  "seen_listings": [
+    "1004043440668968269",
+    "20322615",
+    "1250003008721109842"
+  ],
+  "last_updated": "2025-08-21T08:37:30.693545",
+  "total_urls": 1
 }
