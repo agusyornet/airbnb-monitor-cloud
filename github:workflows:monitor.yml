@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - name: Checkout code
+    - name: Checkout repository
       uses: actions/checkout@v4
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
@@ -23,8 +23,7 @@ jobs:
     
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install selenium webdriver-manager python-dotenv requests beautifulsoup4
+        pip install selenium webdriver-manager python-dotenv requests
     
     - name: Install Chrome
       run: |
@@ -32,6 +31,18 @@ jobs:
         sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list'
         sudo apt-get update
         sudo apt-get install -y google-chrome-stable
+    
+    - name: Check current seen listings
+      run: |
+        echo "=== Current seen_listings.json status ==="
+        if [ -f "seen_listings.json" ]; then
+          echo "File exists, size: $(wc -c < seen_listings.json) bytes"
+          echo "First 200 characters:"
+          head -c 200 seen_listings.json
+        else
+          echo "File does not exist, creating empty one"
+          echo '{"seen_listings": [], "last_updated": "", "total_urls": 0}' > seen_listings.json
+        fi
     
     - name: Run Airbnb Monitor
       env:
@@ -45,12 +56,26 @@ jobs:
       run: |
         python airbnb_monitor_github.py
     
+    - name: Check if seen_listings.json changed
+      run: |
+        echo "=== After running monitor ==="
+        if [ -f "seen_listings.json" ]; then
+          echo "File size: $(wc -c < seen_listings.json) bytes"
+          echo "Git status:"
+          git status seen_listings.json
+        fi
+    
     - name: Commit and push seen listings
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add seen_listings.json
-        git diff --staged --quiet || git commit -m "Update seen listings - $(date)"
-        git push
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Update seen listings - $(date)"
+          git push
+          echo "Pushed changes to repository"
+        fi
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
